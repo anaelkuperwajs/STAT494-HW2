@@ -231,20 +231,82 @@ collect_metrics(lending_club_lasso_tune) %>%
 7. Set up the recipe and the pre-processing steps to build a random forest model. You shouldn't have to do as many steps. The only step you should need to do is making all integers numeric. 
 
 ```{r}
+ranger_recipe <- recipe(Class ~ ., data = lending_club_training) %>%
+  step_mutate_at(has_type(match = "integer"), fn = ~as.numeric(.))
 
+prep(ranger_recipe) %>% 
+  juice()
 ```
 
 
 8. Set up the random forest model and workflow. We will tune the `mtry` and `min_n` parameters and set the number of trees, `trees`, to 100 (otherwise the next steps take too long).
 
 ```{r}
+#define model
+ranger_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>% 
+  set_mode("classification") %>% #regression or classification??
+  set_engine("ranger")
 
+#create workflow
+ranger_workflow <- workflow() %>% 
+  add_recipe(ranger_recipe) %>% 
+  add_model(ranger_spec)
+
+
+# Do I need this stuff below??
+# #fit the model
+# set.seed(712) # for reproducibility - random sampling in random forest choosing number of variables
+# ranger_fit <- ranger_workflow %>% 
+#   fit(lending_club_training)
+# 
+# # compute the training rmse - we'll compare to this later
+# lending_club_training %>% 
+#   select(log_price) %>% 
+#   bind_cols(predict(ranger_fit, new_data = lending_club_training)) %>%
+#   summarize(training_rmse = sqrt(mean((log_price - .pred)^2)))
 ```
 
 
 9. Set up the model tuning for both the `mtry` and `min_n` parameters. Be sure to add the `control_stack_grid()` for the `control` argument so we can use these results later when we stack. Use only 3 levels in the grid. For the `mtry` parameter, you need to put `finalize(mtry(), lending_training %>% select(-Class))` in as an argument instead of just `mtry()`, where `lending_training` is the name of your training data. This is because the `mtry()` grid will otherwise have unknowns in it. This part can take a while to run.
 
+```{r}
+set.seed(494)
+
+penalty_grid <- grid_regular(penalty(), levels = 3)
+penalty_grid
+
+ranger_tune <- ranger_workflow %>% 
+  tune_grid(
+    resamples = lending_club_cv,
+    grid = penalty_grid,
+    control = control_stack_grid()
+    )
+
+ranger_tune %>% 
+  collect_metrics() %>% 
+  filter(.metric == "mtry") %>% 
+  ggplot(aes(x = penalty, y = mean)) +
+  geom_point() +
+  geom_line() +
+  scale_x_log10(
+   breaks = scales::trans_breaks("log10", function(x) 10^x),
+   labels = scales::trans_format("log10",scales::math_format(10^.x))) +
+  labs(x = "penalty", y = "accuracy")
+```
+
+
 10. Find the best tuning parameters. What is the are the accuracy and area under the ROC curve for the model with those tuning parameters?
+
+```{r}
+collect_metrics(ranger_tune) %>% 
+  filter(.metric == "accuracy") %>% 
+  arrange(desc(mean))
+
+collect_metrics(ranger_tune) %>% 
+  filter(.metric == "roc_auc") %>% 
+  arrange(desc(mean))
+```
+
 
 11. Use functions from the `DALEX` and `DALEXtra` libraries to create a histogram and boxplot of the residuals from the training data. How do they look? Any interesting behavior?
 
