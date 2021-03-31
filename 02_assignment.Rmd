@@ -141,8 +141,10 @@ lending_club_recipe <- recipe(Class ~ ., data = lending_club_training) %>%
   step_mutate_at(has_type(match = "integer"), fn = ~as.numeric(.)) %>%
   step_mutate(sub_grade = as.factor(str_sub(sub_grade, end = 1))) %>% 
   step_mutate(addr_state = fct_collapse(addr_state,
-                           West = c("AK", "AZ", "CA", "CO", "HI", "ID", "MT", "NM", "NV", "OR", "UT", "WA", "WY"),
-                           South = c("AL", "AR", "DC", "DE", "FL", "GA", "KY", "LA", "MD", "MS", "NC", "OK", "SC", "TN", "TX", "VA", "WV"),
+                           West = c("AK", "AZ", "CA", "CO", "HI", "ID", "MT", "NM", "NV", "OR", "UT", "WA",
+                                    "WY"),
+                           South = c("AL", "AR", "DC", "DE", "FL", "GA", "KY", "LA", "MD", "MS", "NC", "OK",
+                                     "SC", "TN", "TX", "VA", "WV"),
                            Northeast = c("CT", "MA", "ME", "NH", "NJ", "NY", "PA", "RI", "VT"),
                            Midwest = c("IL", "IN", "KS", "MI", "MO", "MN", "ND", "NE", "OH", "SD", "WI"))) %>%
   step_normalize(all_numeric(), -all_outcomes()) %>% 
@@ -216,7 +218,7 @@ lending_club_lasso_tune %>%
   scale_x_log10(
    breaks = scales::trans_breaks("log10", function(x) 10^x),
    labels = scales::trans_format("log10",scales::math_format(10^.x))) +
-  labs(x = "penalty", y = "accuracy")
+  labs(x = "penalty", y = "ROC")
 
 collect_metrics(lending_club_lasso_tune) %>% 
   filter(.metric == "accuracy") %>% 
@@ -244,26 +246,13 @@ prep(ranger_recipe) %>%
 ```{r}
 #define model
 ranger_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 100) %>% 
-  set_mode("classification") %>% #regression or classification??
+  set_mode("classification") %>%
   set_engine("ranger")
 
 #create workflow
 ranger_workflow <- workflow() %>% 
   add_recipe(ranger_recipe) %>% 
   add_model(ranger_spec)
-
-
-# Do I need this stuff below??
-# #fit the model
-# set.seed(712) # for reproducibility - random sampling in random forest choosing number of variables
-# ranger_fit <- ranger_workflow %>% 
-#   fit(lending_club_training)
-# 
-# # compute the training rmse - we'll compare to this later
-# lending_club_training %>% 
-#   select(log_price) %>% 
-#   bind_cols(predict(ranger_fit, new_data = lending_club_training)) %>%
-#   summarize(training_rmse = sqrt(mean((log_price - .pred)^2)))
 ```
 
 
@@ -272,30 +261,22 @@ ranger_workflow <- workflow() %>%
 ```{r}
 set.seed(494)
 
-penalty_grid <- grid_regular(penalty(), levels = 3)
-penalty_grid
+rf_grid <- grid_regular(finalize(mtry(), lending_club_training %>% select(-Class)),
+                        min_n(),
+                        levels = 3)
 
 ranger_tune <- ranger_workflow %>% 
   tune_grid(
     resamples = lending_club_cv,
-    grid = penalty_grid,
+    grid = rf_grid,
     control = control_stack_grid()
     )
-
-ranger_tune %>% 
-  collect_metrics() %>% 
-  filter(.metric == "mtry") %>% 
-  ggplot(aes(x = penalty, y = mean)) +
-  geom_point() +
-  geom_line() +
-  scale_x_log10(
-   breaks = scales::trans_breaks("log10", function(x) 10^x),
-   labels = scales::trans_format("log10",scales::math_format(10^.x))) +
-  labs(x = "penalty", y = "accuracy")
 ```
 
 
-10. Find the best tuning parameters. What is the are the accuracy and area under the ROC curve for the model with those tuning parameters?
+10. Find the best tuning parameters. What are the accuracy and area under the ROC curve for the model with those tuning parameters?
+
+They are both similar, with the best means being approximately 0.99 for both accuracy and area under the ROC curve. The best tuning parameter for the area under the ROC curve is slightly better, with a mean of 0.9972544
 
 ```{r}
 collect_metrics(ranger_tune) %>% 
@@ -305,27 +286,84 @@ collect_metrics(ranger_tune) %>%
 collect_metrics(ranger_tune) %>% 
   filter(.metric == "roc_auc") %>% 
   arrange(desc(mean))
+
+best_param_acc <- ranger_tune %>% 
+  select_best(metric = "accuracy")
+
+best_param_roc <- ranger_tune %>% 
+  select_best(metric = "roc_auc")
 ```
 
 
 11. Use functions from the `DALEX` and `DALEXtra` libraries to create a histogram and boxplot of the residuals from the training data. How do they look? Any interesting behavior?
 
-just do random forest
+ANSWER
 
 ```{r}
-lending_training %>% 
+ranger_final_model <- ranger_workflow %>%
+  finalize_workflow(best_param_roc) %>%
+  fit(data = lending_club_training)
+
+rf_explain <-
+  explain_tidymodels(
+    model = ranger_final_model,
+    data = lending_club_training %>% select(-Class),
+    y = lending_club_training %>% 
       mutate(Class_num = as.integer(Class =="good")) %>% 
-      pull(Class_num)
+      pull(Class_num),
+    label = "rf"
+  )
+
+rf_mod_perf <-  model_performance(rf_explain)
+rf_mod_perf
+
+hist_plot <- 
+  plot(rf_mod_perf,
+       rf_mod_perf, 
+       geom = "histogram")
+box_plot <-
+  plot(rf_mod_perf,
+       rf_mod_perf, 
+       geom = "boxplot")
+
+hist_plot + box_plot
 ```
 
 
 12. Use `DALEX` functions to create a variable importance plot from this model. What are the most important variables? 
 
-just do random forest
+The four most important variables are int_rate, addr_state, open_il_12m, annual_inc.
+
+```{r}
+set.seed(494)
+rf_var_imp <- 
+  model_parts(
+    rf_explain
+    )
+
+plot(rf_var_imp, show_boxplots = TRUE)
+```
+
+
 
 13. Write a function called `cp_profile` to make a CP profile. The function will take an explainer, a new observation, and a variable name as its arguments and create a CP profile for a quantitative predictor variable. You will need to use the `predict_profile()` function inside the function you create - put the variable name there so the plotting part is easier. You'll also want to use `aes_string()` rather than `aes()` and quote the variables. Use the `cp_profile()` function to create one CP profile of your choosing. Be sure to choose a variable that is numeric, not integer. There seem to be issues with those that I'm looking into.
 
-just do random forest
+```{r}
+cp_profile <- function(explainer, new_observation, var) {
+  cp <-
+    predict_profile(explainer = explainer, new_observation = new_observation, variables = var)
+  cp %>%
+    rename(yhat = '_yhat_') %>%
+    ggplot(aes_string(x = var, y = "yhat")) +
+    geom_line()
+}
+
+ob <-
+  lending_club_testing %>% 
+  slice(4)
+
+cp_profile(rf_explain, ob, "int_rate")
+```
 
 
 For an extra challenge, write a function that will work for either a quantitative or categorical variable. 
@@ -335,11 +373,45 @@ If you need help with function writing check out the [Functions](https://r4ds.ha
 
 14. Use `DALEX` functions to create partial dependence plots (with the CP profiles in gray) for the 3-4 most important variables. If the important variables are categorical, you can instead make a CP profile for 3 observations in the dataset and discuss how you could go about constructing a partial dependence plot for a categorical variable (you don't have to code it, but you can if you want an extra challenge). If it ever gives you an error that says, "Error: Can't convert from `VARIABLE` <double> to `VARIABLE` <integer> due to loss of precision", then remove that variable from the list. I seem to have figured out why it's doing that, but I don't know how to fix it yet.
 
+```{r}
+set.seed(494)
+rf_pdp <- model_profile(explainer = rf_explain, variables = c("annual_inc", "int_rate", "open_il_12m"))
+
+plot(rf_pdp, 
+     variables = c("annual_inc", "int_rate", "open_il_12m"),
+     geom = "profiles")
+
+set.seed(494)
+rf_pdp <- model_profile(explainer = rf_explain, variables = "addr_state")
+
+plot(rf_pdp, 
+     variables = "addr_state",
+     geom = "profiles")
+```
+
+
 15. Fit one more model type of your choosing that will feed into the stacking model. 
+
+```{r}
+
+```
+
 
 16. Create a model stack with the candidate models from the previous parts of the exercise and use the `blend_predictions()` function to find the coefficients of the stacked model. Create a plot examining the performance metrics for the different penalty parameters to assure you have captured the best one. If not, adjust the penalty. (HINT: use the `autoplot()` function). Which models are contributing most?
 
+ANSWER
+
+```{r}
+
+```
+
+
 17. Fit the final stacked model using `fit_members()`. Apply the model to the test data and report the accuracy and area under the curve. Create a graph of the ROC and construct a confusion matrix. Comment on what you see. Save this final model using the `saveRDS()` function - see the [Use the model](https://advanced-ds-in-r.netlify.app/posts/2021-03-16-ml-review/#use-the-model) section of the `tidymodels` intro. We are going to use the model in the next part. You'll want to save it in the folder where you create your shiny app.
+
+```{r}
+
+```
+
 
 ## Shiny app
 
