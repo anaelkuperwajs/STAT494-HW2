@@ -297,7 +297,7 @@ best_param_roc <- ranger_tune %>%
 
 11. Use functions from the `DALEX` and `DALEXtra` libraries to create a histogram and boxplot of the residuals from the training data. How do they look? Any interesting behavior?
 
-ANSWER
+Something that is interesting is that there is a huge spike around the residual of 0, with majority of values being more positive than negative. It doesn't look like there are any odd values and the boxplot shows how the absolute value of all the residuals is very small, under 0.1. The center is close to 0 and the spread is not very large.
 
 ```{r}
 ranger_final_model <- ranger_workflow %>%
@@ -364,11 +364,6 @@ ob <-
 
 cp_profile(rf_explain, ob, "int_rate")
 ```
-
-
-For an extra challenge, write a function that will work for either a quantitative or categorical variable. 
-
-If you need help with function writing check out the [Functions](https://r4ds.had.co.nz/functions.html) chapter of R4DS by Wickham and Grolemund.
 
 
 14. Use `DALEX` functions to create partial dependence plots (with the CP profiles in gray) for the 3-4 most important variables. If the important variables are categorical, you can instead make a CP profile for 3 observations in the dataset and discuss how you could go about constructing a partial dependence plot for a categorical variable (you don't have to code it, but you can if you want an extra challenge). If it ever gives you an error that says, "Error: Can't convert from `VARIABLE` <double> to `VARIABLE` <integer> due to loss of precision", then remove that variable from the list. I seem to have figured out why it's doing that, but I don't know how to fix it yet.
