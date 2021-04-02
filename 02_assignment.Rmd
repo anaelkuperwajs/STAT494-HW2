@@ -501,7 +501,13 @@ Specifically, you will do the following:
 * After the user has entered all the required values, the output will be a CP profile with the the predicted value for the data that was entered, indicated by a point. I don't think the functions from `DALEX` and `DALEXtra` will work with a stacked model, so you'll likely have to (get to) do some of your own coding. 
 * Use the `bslib` to theme your shiny app!  
 * Publish your app to [shinyapps.io](https://www.shinyapps.io/). There are instructions for doing that on the tutorial I linked to above.   
-* Write a paragraph or two describing your app on your website! Link to the app and your GitHub repository in your post. Include a link to your post here. 
+* Write a paragraph or two describing your app on your website! Link to the app and your GitHub repository in your post. Include a link to your post here.
+
+Website page link: https://clever-shaw-7eff52.netlify.app/shiny.html
+
+Shiny app link: https://anaelkuperwajs.shinyapps.io/STAT494-HW2-ShinyApp/
+
+Github repository: https://github.com/anaelkuperwajs/STAT494-HW2-ShinyApp
 
 
 ## Coded Bias
